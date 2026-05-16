@@ -17,31 +17,7 @@ npm run dev
 
 Acesse: http://localhost:3000
 
-## Deploy na Vercel (5 minutos)
 
-### Opção 1 — Via GitHub (recomendado)
-
-1. Crie um repositório no GitHub e suba o projeto:
-```bash
-git init
-git add .
-git commit -m "primeiro commit"
-git remote add origin https://github.com/seu-usuario/fardamento.git
-git push -u origin main
-```
-
-2. Acesse [vercel.com](https://vercel.com) → "Add New Project"
-3. Importe o repositório do GitHub
-4. Clique em **Deploy** — pronto!
-
-### Opção 2 — Via Vercel CLI
-
-```bash
-npm install -g vercel
-vercel
-```
-
-Siga o wizard. Em ~2 minutos está no ar.
 
 ## Funcionalidades
 

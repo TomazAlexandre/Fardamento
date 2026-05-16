@@ -180,7 +180,7 @@ function ProdutosTab({ produtos, setProdutos }) {
   const [form, setForm] = useState(null); // null = hidden, {} = new, {...} = edit
 
   function openNovo() {
-    setForm({ nome: '', tipo: 'Camisa Polo', imposto: 7, custos: [{ nome: '', valor: '' }] });
+    setForm({ nome: '', tipo: 'Camisa Polo', imposto: 7, custos: [] });
   }
   function openEditar(p) {
     setForm({ ...p, imposto: (p.imposto || 0.07) * 100, custos: p.custos.map(c => ({ ...c })) });
@@ -223,19 +223,53 @@ function ProdutosTab({ produtos, setProdutos }) {
             <input type="number" value={form.imposto} onChange={e => setForm({ ...form, imposto: e.target.value })} className={`${inp} w-32`} />
           </Field>
           <div className="mt-4">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-medium text-gray-700">Composição de Custos</span>
-              <button onClick={() => setForm({ ...form, custos: [...form.custos, { nome: '', valor: '' }] })} className={btnSecondary}>+ Item</button>
+            <div className="flex justify-between items-center mb-3">
+              <span className="text-sm font-semibold text-gray-800">Composição de Custos</span>
+              <button onClick={() => setForm({ ...form, custos: [...form.custos, { nome: '', valor: '' }] })} className={btnPrimary}>+ Adicionar item</button>
             </div>
+            {/* Header da tabela */}
+            <div className="flex gap-2 mb-1 px-1">
+              <span className="flex-1 text-xs font-medium text-gray-400 uppercase tracking-wide">Nome do item</span>
+              <span className="w-32 text-xs font-medium text-gray-400 uppercase tracking-wide">Valor (R$)</span>
+              <span className="w-6"></span>
+            </div>
+            {form.custos.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">
+                Clique em "+ Adicionar item" para começar
+              </p>
+            )}
             {form.custos.map((c, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <input value={c.nome} onChange={e => setForm({ ...form, custos: form.custos.map((x, j) => j === i ? { ...x, nome: e.target.value } : x) })}
-                  placeholder="Nome do item" className={`${inp} flex-1`} />
-                <input type="number" step="0.01" value={c.valor} onChange={e => setForm({ ...form, custos: form.custos.map((x, j) => j === i ? { ...x, valor: e.target.value } : x) })}
-                  placeholder="R$" className={`${inp} w-28`} />
-                <button onClick={() => setForm({ ...form, custos: form.custos.filter((_, j) => j !== i) })} className="text-red-400 hover:text-red-600">✕</button>
+              <div key={i} className="flex gap-2 mb-2 items-center">
+                <input
+                  value={c.nome}
+                  onChange={e => setForm({ ...form, custos: form.custos.map((x, j) => j === i ? { ...x, nome: e.target.value } : x) })}
+                  placeholder="Ex: Costura, Malha, Bordado..."
+                  className={`${inp} flex-1`}
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={c.valor}
+                  onChange={e => setForm({ ...form, custos: form.custos.map((x, j) => j === i ? { ...x, valor: e.target.value } : x) })}
+                  placeholder="0,00"
+                  className={`${inp} w-32 text-right`}
+                />
+                <button
+                  onClick={() => setForm({ ...form, custos: form.custos.filter((_, j) => j !== i) })}
+                  className="w-6 text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
+                  title="Remover item"
+                >✕</button>
               </div>
             ))}
+            {form.custos.length > 0 && (
+              <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
+                <span className="text-xs text-gray-400">Subtotal (sem imposto):</span>
+                <span className="text-xs font-semibold text-emerald-700">
+                  {fmt(form.custos.reduce((a, c) => a + (parseFloat(c.valor) || 0), 0))}
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex gap-2 justify-end mt-4">
             <button onClick={() => setForm(null)} className={btnSecondary}>Cancelar</button>
