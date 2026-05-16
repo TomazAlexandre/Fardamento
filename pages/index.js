@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   getProdutos, saveProdutos, getOrcamentos, saveOrcamentos,
   getMateriais, saveMateriais, getServicos, saveServicos,
   getColaboradores, saveColaboradores,
-  custoProduto, fmt,
+  custoProduto, custoItem, fmt,
   MATERIAIS_BANCO, SERVICOS_BANCO, COLABORADORES_BANCO
 } from '../lib/db';
 
@@ -52,7 +52,14 @@ export default function Home() {
 
       <main className="max-w-5xl mx-auto px-4 py-6">
         {tab === 'orcamento' && <OrcamentoTab produtos={produtos} orcamentos={orcamentos} setOrcamentos={v => { setOrcamentos(v); saveOrcamentos(v); }} />}
-        {tab === 'produtos' && <ProdutosTab produtos={produtos} setProdutos={v => { setProdutos(v); saveProdutos(v); }} />}
+        {tab === 'produtos' && (
+          <ProdutosTab
+            produtos={produtos}
+            setProdutos={v => { setProdutos(v); saveProdutos(v); }}
+            materiais={materiais}
+            servicos={servicos}
+          />
+        )}
         {tab === 'materiais' && <MateriaisTab materiais={materiais} setMateriais={v => { setMateriais(v); saveMateriais(v); }} servicos={servicos} setServicos={v => { setServicos(v); saveServicos(v); }} />}
         {tab === 'historico' && <HistoricoTab orcamentos={orcamentos} setOrcamentos={v => { setOrcamentos(v); saveOrcamentos(v); }} produtos={produtos} />}
         {tab === 'colaboradores' && <ColaboradoresTab colaboradores={colaboradores} setColaboradores={v => { setColaboradores(v); saveColaboradores(v); }} />}
@@ -176,29 +183,95 @@ function OrcamentoTab({ produtos, orcamentos, setOrcamentos }) {
 }
 
 // ─── PRODUTOS ────────────────────────────────────────────────────────────────
-function ProdutosTab({ produtos, setProdutos }) {
-  const [form, setForm] = useState(null); // null = hidden, {} = new, {...} = edit
+function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
+  const [form, setForm] = useState(null);
+  // 'banco' = selecionar do banco | 'manual' = digitar livre
+  const [addMode, setAddMode] = useState(null);
+  // estado temporário do item sendo adicionado via banco
+  const [itemBanco, setItemBanco] = useState({ tipo: 'servico', refId: '', quantidade: 1 });
 
   function openNovo() {
     setForm({ nome: '', tipo: 'Camisa Polo', imposto: 7, custos: [] });
+    setAddMode(null);
   }
   function openEditar(p) {
     setForm({ ...p, imposto: (p.imposto || 0.07) * 100, custos: p.custos.map(c => ({ ...c })) });
+    setAddMode(null);
   }
   function salvar() {
     if (!form.nome.trim()) { alert('Informe o nome'); return; }
-    const p = { ...form, imposto: (parseFloat(form.imposto) || 7) / 100, custos: form.custos.filter(c => c.nome) };
+    const p = { ...form, imposto: (parseFloat(form.imposto) || 7) / 100 };
     if (p.id) {
       setProdutos(produtos.map(x => x.id === p.id ? p : x));
     } else {
       setProdutos([...produtos, { ...p, id: Date.now() }]);
     }
     setForm(null);
+    setAddMode(null);
   }
   function excluir(id) {
     if (!confirm('Excluir produto?')) return;
     setProdutos(produtos.filter(p => p.id !== id));
   }
+
+  // Confirma adição do item do banco
+  function confirmarItemBanco() {
+    const refId = parseInt(itemBanco.refId);
+    if (!refId) { alert('Selecione um item'); return; }
+    const qtd = parseFloat(itemBanco.quantidade) || 1;
+
+    let novoItem;
+    if (itemBanco.tipo === 'material') {
+      const m = materiais.find(x => x.id === refId);
+      if (!m) return;
+      novoItem = {
+        tipo: 'material',
+        refId: m.id,
+        nome: m.nome,
+        quantidade: qtd,
+        valorRef: parseFloat(m.valor),
+        rendimento: parseFloat(m.rendimento) || 1,
+        medida: m.medida,
+      };
+    } else {
+      const s = servicos.find(x => x.id === refId);
+      if (!s) return;
+      novoItem = {
+        tipo: 'servico',
+        refId: s.id,
+        nome: s.nome,
+        quantidade: qtd,
+        valorRef: parseFloat(s.valor),
+        medida: s.medida,
+      };
+    }
+
+    setForm({ ...form, custos: [...form.custos, novoItem] });
+    setItemBanco({ tipo: 'servico', refId: '', quantidade: 1 });
+    setAddMode(null);
+  }
+
+  // Adiciona item manual
+  function confirmarItemManual() {
+    setForm({
+      ...form,
+      custos: [...form.custos, { tipo: 'manual', nome: '', quantidade: 1, valorManual: '' }]
+    });
+    setAddMode(null);
+  }
+
+  // Atualiza campo de um custo existente
+  function updateCusto(i, campo, valor) {
+    setForm({
+      ...form,
+      custos: form.custos.map((c, j) => j === i ? { ...c, [campo]: valor } : c)
+    });
+  }
+
+  const subtotal = form ? form.custos.reduce((a, c) => a + custoItem(c), 0) : 0;
+
+  // Lista combinada para o seletor do banco
+  const listaBanco = itemBanco.tipo === 'material' ? materiais : servicos;
 
   return (
     <div className="space-y-4">
@@ -209,6 +282,7 @@ function ProdutosTab({ produtos, setProdutos }) {
 
       {form && (
         <Card title={form.id ? `Editando: ${form.nome}` : 'Novo Produto'}>
+          {/* Campos base */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <Field label="Nome">
               <input value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} className={inp} placeholder="Nome do produto" />
@@ -222,65 +296,237 @@ function ProdutosTab({ produtos, setProdutos }) {
           <Field label="Imposto NF (%)">
             <input type="number" value={form.imposto} onChange={e => setForm({ ...form, imposto: e.target.value })} className={`${inp} w-32`} />
           </Field>
-          <div className="mt-4">
+
+          {/* Composição */}
+          <div className="mt-5">
             <div className="flex justify-between items-center mb-3">
               <span className="text-sm font-semibold text-gray-800">Composição de Custos</span>
-              <button onClick={() => setForm({ ...form, custos: [...form.custos, { nome: '', valor: '' }] })} className={btnPrimary}>+ Adicionar item</button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAddMode(addMode === 'banco' ? null : 'banco')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${addMode === 'banco' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'}`}
+                >
+                  🧵 Do banco
+                </button>
+                <button
+                  onClick={() => {
+                    setAddMode(null);
+                    setForm({ ...form, custos: [...form.custos, { tipo: 'manual', nome: '', quantidade: 1, valorManual: '' }] });
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors"
+                >
+                  ✏️ Manual
+                </button>
+              </div>
             </div>
-            {/* Header da tabela */}
-            <div className="flex gap-2 mb-1 px-1">
-              <span className="flex-1 text-xs font-medium text-gray-400 uppercase tracking-wide">Nome do item</span>
-              <span className="w-32 text-xs font-medium text-gray-400 uppercase tracking-wide">Valor (R$)</span>
-              <span className="w-6"></span>
-            </div>
-            {form.custos.length === 0 && (
+
+            {/* Painel seleção do banco */}
+            {addMode === 'banco' && (
+              <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <p className="text-xs font-semibold text-emerald-800 mb-2">Adicionar do banco</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {/* Tipo: material ou serviço */}
+                  <Field label="Tipo">
+                    <select
+                      value={itemBanco.tipo}
+                      onChange={e => setItemBanco({ tipo: e.target.value, refId: '', quantidade: 1 })}
+                      className={inp}
+                    >
+                      <option value="servico">🪡 Serviço</option>
+                      <option value="material">🧵 Material</option>
+                    </select>
+                  </Field>
+
+                  {/* Item do banco */}
+                  <Field label={itemBanco.tipo === 'material' ? 'Material' : 'Serviço'}>
+                    <select
+                      value={itemBanco.refId}
+                      onChange={e => setItemBanco({ ...itemBanco, refId: e.target.value })}
+                      className={inp}
+                    >
+                      <option value="">Selecione...</option>
+                      {listaBanco.map(x => {
+                        const rend = itemBanco.tipo === 'material' && x.rendimento
+                          ? ` (rend. ${x.rendimento})`
+                          : '';
+                        return (
+                          <option key={x.id} value={x.id}>
+                            {x.nome} — {fmt(x.valor)}/{x.medida}{rend}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </Field>
+
+                  {/* Quantidade */}
+                  <Field label={itemBanco.tipo === 'material' ? 'Quantidade (Kg/m/un)' : 'Quantidade (peças)'}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={itemBanco.quantidade}
+                      onChange={e => setItemBanco({ ...itemBanco, quantidade: e.target.value })}
+                      className={inp}
+                    />
+                  </Field>
+                </div>
+
+                {/* Preview do custo */}
+                {itemBanco.refId && (() => {
+                  const item = listaBanco.find(x => x.id === parseInt(itemBanco.refId));
+                  if (!item) return null;
+                  const qtd = parseFloat(itemBanco.quantidade) || 1;
+                  let custo, formula;
+                  if (itemBanco.tipo === 'material') {
+                    const rend = parseFloat(item.rendimento) || 1;
+                    custo = (item.valor / rend) * qtd;
+                    formula = `${fmt(item.valor)} ÷ ${rend} × ${qtd} = ${fmt(custo)}`;
+                  } else {
+                    custo = item.valor * qtd;
+                    formula = `${fmt(item.valor)} × ${qtd} = ${fmt(custo)}`;
+                  }
+                  return (
+                    <div className="mt-2 flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-emerald-200">
+                      <span className="text-xs text-gray-500 font-mono">{formula}</span>
+                      <span className="text-sm font-semibold text-emerald-700">{fmt(custo)}</span>
+                    </div>
+                  );
+                })()}
+
+                <div className="flex gap-2 justify-end mt-2">
+                  <button onClick={() => setAddMode(null)} className={btnSecondary + ' text-xs py-1 px-3'}>Cancelar</button>
+                  <button onClick={confirmarItemBanco} className={btnPrimary + ' text-xs py-1 px-3'}>+ Adicionar</button>
+                </div>
+              </div>
+            )}
+
+            {/* Lista de itens da composição */}
+            {form.custos.length === 0 && addMode !== 'banco' && (
               <p className="text-sm text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">
-                Clique em "+ Adicionar item" para começar
+                Clique em "🧵 Do banco" ou "✏️ Manual" para adicionar itens
               </p>
             )}
-            {form.custos.map((c, i) => (
-              <div key={i} className="flex gap-2 mb-2 items-center">
-                <input
-                  value={c.nome}
-                  onChange={e => setForm({ ...form, custos: form.custos.map((x, j) => j === i ? { ...x, nome: e.target.value } : x) })}
-                  placeholder="Ex: Costura, Malha, Bordado..."
-                  className={`${inp} flex-1`}
-                />
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={c.valor}
-                  onChange={e => setForm({ ...form, custos: form.custos.map((x, j) => j === i ? { ...x, valor: e.target.value } : x) })}
-                  placeholder="0,00"
-                  className={`${inp} w-32 text-right`}
-                />
-                <button
-                  onClick={() => setForm({ ...form, custos: form.custos.filter((_, j) => j !== i) })}
-                  className="w-6 text-red-400 hover:text-red-600 text-lg leading-none flex-shrink-0"
-                  title="Remover item"
-                >✕</button>
-              </div>
-            ))}
+
+            <div className="space-y-2">
+              {/* Header */}
+              {form.custos.length > 0 && (
+                <div className="grid grid-cols-12 gap-2 px-1 mb-1">
+                  <span className="col-span-5 text-xs font-medium text-gray-400 uppercase tracking-wide">Item</span>
+                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase tracking-wide text-center">Qtd</span>
+                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase tracking-wide text-right">Valor unit.</span>
+                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase tracking-wide text-right">Custo</span>
+                  <span className="col-span-1"></span>
+                </div>
+              )}
+
+              {form.custos.map((c, i) => {
+                const custo = custoItem(c);
+                const badge = c.tipo === 'material'
+                  ? 'bg-blue-50 text-blue-600'
+                  : c.tipo === 'servico'
+                    ? 'bg-purple-50 text-purple-600'
+                    : 'bg-gray-100 text-gray-500';
+                const badgeLabel = c.tipo === 'material' ? 'material' : c.tipo === 'servico' ? 'serviço' : 'manual';
+
+                return (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center bg-gray-50 rounded-lg px-2 py-2">
+                    {/* Nome */}
+                    <div className="col-span-5 flex items-center gap-1.5 min-w-0">
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${badge}`}>{badgeLabel}</span>
+                      {c.tipo === 'manual' ? (
+                        <input
+                          value={c.nome}
+                          onChange={e => updateCusto(i, 'nome', e.target.value)}
+                          placeholder="Nome do item..."
+                          className="text-xs border border-gray-200 rounded px-2 py-1 flex-1 min-w-0 bg-white"
+                        />
+                      ) : (
+                        <span className="text-xs font-medium text-gray-800 truncate">{c.nome}</span>
+                      )}
+                    </div>
+
+                    {/* Quantidade */}
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={c.quantidade}
+                        onChange={e => updateCusto(i, 'quantidade', parseFloat(e.target.value) || 1)}
+                        className="w-full text-center text-xs border border-gray-200 rounded-md py-1 bg-white"
+                      />
+                    </div>
+
+                    {/* Valor unitário — editável só no manual */}
+                    <div className="col-span-2 text-right">
+                      {c.tipo === 'manual' ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={c.valorManual}
+                          onChange={e => updateCusto(i, 'valorManual', e.target.value)}
+                          placeholder="0,00"
+                          className="w-full text-right text-xs border border-gray-200 rounded-md py-1 bg-white"
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-500">
+                          {c.tipo === 'material'
+                            ? `${fmt(c.valorRef)}/${c.medida}÷${c.rendimento}`
+                            : fmt(c.valorRef)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Custo calculado */}
+                    <div className="col-span-2 text-right">
+                      <span className="text-sm font-semibold text-emerald-700">{fmt(custo)}</span>
+                    </div>
+
+                    {/* Remover */}
+                    <div className="col-span-1 flex justify-center">
+                      <button
+                        onClick={() => setForm({ ...form, custos: form.custos.filter((_, j) => j !== i) })}
+                        className="text-red-400 hover:text-red-600 text-base leading-none"
+                        title="Remover"
+                      >✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Totais */}
             {form.custos.length > 0 && (
-              <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
-                <span className="text-xs text-gray-400">Subtotal (sem imposto):</span>
-                <span className="text-xs font-semibold text-emerald-700">
-                  {fmt(form.custos.reduce((a, c) => a + (parseFloat(c.valor) || 0), 0))}
-                </span>
+              <div className="mt-3 pt-2 border-t border-gray-200 space-y-1">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Subtotal (sem imposto)</span>
+                  <span className="font-semibold text-gray-700">{fmt(subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Imposto NF ({form.imposto || 7}%)</span>
+                  <span className="font-semibold text-amber-600">{fmt(subtotal * ((parseFloat(form.imposto) || 7) / 100))}</span>
+                </div>
+                <div className="flex justify-between text-sm font-bold text-gray-900 pt-1 border-t border-gray-200">
+                  <span>Custo total</span>
+                  <span className="text-emerald-700">{fmt(subtotal * (1 + (parseFloat(form.imposto) || 7) / 100))}</span>
+                </div>
               </div>
             )}
           </div>
+
           <div className="flex gap-2 justify-end mt-4">
-            <button onClick={() => setForm(null)} className={btnSecondary}>Cancelar</button>
+            <button onClick={() => { setForm(null); setAddMode(null); }} className={btnSecondary}>Cancelar</button>
             <button onClick={salvar} className={btnPrimary}>Salvar</button>
           </div>
         </Card>
       )}
 
+      {/* Lista de produtos cadastrados */}
       <div className="space-y-3">
         {produtos.map(p => {
           const custo = custoProduto(p);
+          const subtotalP = (p.custos || []).reduce((a, c) => a + custoItem(c), 0);
           return (
             <Card key={p.id}>
               <div className="flex justify-between items-start mb-2">
@@ -296,15 +542,28 @@ function ProdutosTab({ produtos, setProdutos }) {
                 </div>
               </div>
               <div className="border-t border-gray-100 pt-2 grid grid-cols-2 gap-x-4 gap-y-1">
-                {p.custos.map((c, i) => (
-                  <div key={i} className="flex justify-between text-xs">
-                    <span className="text-gray-500">{c.nome}</span>
-                    <span className="font-medium text-gray-700">{fmt(c.valor)}</span>
-                  </div>
-                ))}
+                {(p.custos || []).map((c, i) => {
+                  const badge = c.tipo === 'material'
+                    ? 'bg-blue-50 text-blue-600'
+                    : c.tipo === 'servico'
+                      ? 'bg-purple-50 text-purple-600'
+                      : 'bg-gray-100 text-gray-500';
+                  return (
+                    <div key={i} className="flex justify-between items-center text-xs gap-1">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className={`text-[9px] px-1 py-0.5 rounded-full flex-shrink-0 font-semibold ${badge}`}>
+                          {c.tipo === 'material' ? 'mat' : c.tipo === 'servico' ? 'svc' : 'man'}
+                        </span>
+                        <span className="text-gray-500 truncate">{c.nome}</span>
+                        {c.quantidade !== 1 && <span className="text-gray-400 flex-shrink-0">×{c.quantidade}</span>}
+                      </div>
+                      <span className="font-medium text-gray-700 flex-shrink-0">{fmt(custoItem(c))}</span>
+                    </div>
+                  );
+                })}
                 <div className="flex justify-between text-xs col-span-2 border-t border-gray-100 pt-1 mt-1">
                   <span className="text-gray-500">Imposto NF ({((p.imposto || 0.07) * 100).toFixed(0)}%)</span>
-                  <span className="font-medium text-amber-700">{fmt(p.custos.reduce((a, c) => a + (parseFloat(c.valor) || 0), 0) * (p.imposto || 0.07))}</span>
+                  <span className="font-medium text-amber-700">{fmt(subtotalP * (p.imposto || 0.07))}</span>
                 </div>
               </div>
             </Card>
@@ -351,8 +610,8 @@ function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
                 <Field label="Nome"><input value={editM.nome} onChange={e => setEditM({ ...editM, nome: e.target.value })} className={inp} /></Field>
                 <Field label="Valor (R$)"><input type="number" step="0.01" value={editM.valor} onChange={e => setEditM({ ...editM, valor: e.target.value })} className={inp} /></Field>
                 <Field label="Medida"><input value={editM.medida} onChange={e => setEditM({ ...editM, medida: e.target.value })} className={inp} placeholder="metro, Kg, unidade..." /></Field>
-                <Field label="Rendimento"><input value={editM.rendimento} onChange={e => setEditM({ ...editM, rendimento: e.target.value })} className={inp} placeholder="peças por unidade" /></Field>
-                <Field label="Consumo por peça"><input value={editM.consumo} onChange={e => setEditM({ ...editM, consumo: e.target.value })} className={inp} placeholder="metros, kg etc" /></Field>
+                <Field label="Rendimento (peças por unidade)"><input type="number" step="0.01" value={editM.rendimento} onChange={e => setEditM({ ...editM, rendimento: e.target.value })} className={inp} placeholder="ex: 3" /></Field>
+                <Field label="Consumo por peça (opcional)"><input value={editM.consumo} onChange={e => setEditM({ ...editM, consumo: e.target.value })} className={inp} placeholder="metros, kg etc" /></Field>
               </div>
               <div className="flex gap-2 justify-end mt-3">
                 <button onClick={() => setEditM(null)} className={btnSecondary}>Cancelar</button>
