@@ -1,27 +1,154 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-  getProdutos, saveProdutos, getOrcamentos, saveOrcamentos,
-  getMateriais, saveMateriais, getServicos, saveServicos,
-  getColaboradores, saveColaboradores,
+  signIn, signUp, signOut, onAuthChange, seedDadosIniciais,
+  getMateriais, saveMaterial, deleteMaterial,
+  getServicos, saveServico, deleteServico,
+  getProdutos, saveProduto, deleteProduto,
+  getOrcamentos, saveOrcamento, deleteOrcamento,
+  getColaboradores, saveColaborador, deleteColaborador,
   custoProduto, custoItem, fmt,
-  MATERIAIS_BANCO, SERVICOS_BANCO, COLABORADORES_BANCO
 } from '../lib/db';
 
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function Home() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const { data: { subscription } } = onAuthChange(async (u) => {
+      setUser(u);
+      setLoading(false);
+      if (u) await seedDadosIniciais(u.id);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-gray-400 text-sm">Carregando...</div>
+    </div>
+  );
+
+  if (!user) return <LoginPage />;
+  return <App user={user} />;
+}
+
+// ─── LOGIN ────────────────────────────────────────────────────────────────────
+function LoginPage() {
+  const [mode, setMode] = useState('login'); // 'login' | 'register'
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [nome, setNome] = useState('');
+  const [erro, setErro] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErro(''); setMsg('');
+    setLoading(true);
+    try {
+      if (mode === 'login') {
+        await signIn(email, senha);
+      } else {
+        if (!nome.trim()) { setErro('Informe seu nome'); setLoading(false); return; }
+        await signUp(email, senha, nome);
+        setMsg('Conta criada! Verifique seu e-mail para confirmar, depois faça login.');
+        setMode('login');
+      }
+    } catch (err) {
+      setErro(err.message || 'Erro ao autenticar');
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <h1 className="text-2xl font-bold text-gray-900">Sistema de Fardamento</h1>
+          <p className="text-sm text-gray-400 mt-1">Gestão de custos e orçamentos</p>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+          <div className="flex gap-1 mb-6 bg-gray-100 rounded-xl p-1">
+            <button
+              onClick={() => { setMode('login'); setErro(''); setMsg(''); }}
+              className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'login' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            >Entrar</button>
+            <button
+              onClick={() => { setMode('register'); setErro(''); setMsg(''); }}
+              className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'register' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            >Criar conta</button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
+            {mode === 'register' && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Nome</label>
+                <input
+                  type="text" value={nome} onChange={e => setNome(e.target.value)}
+                  placeholder="Seu nome" required
+                  className={inp}
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">E-mail</label>
+              <input
+                type="email" value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="seu@email.com" required
+                className={inp}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Senha</label>
+              <input
+                type="password" value={senha} onChange={e => setSenha(e.target.value)}
+                placeholder="••••••••" required minLength={6}
+                className={inp}
+              />
+              {mode === 'register' && <p className="text-xs text-gray-400 mt-1">Mínimo 6 caracteres</p>}
+            </div>
+
+            {erro && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{erro}</p>}
+            {msg  && <p className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">{msg}</p>}
+
+            <button
+              type="submit" disabled={loading}
+              className="w-full py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 mt-1"
+            >
+              {loading ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Criar conta'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP PRINCIPAL ────────────────────────────────────────────────────────────
+function App({ user }) {
   const [tab, setTab] = useState('orcamento');
   const [produtos, setProdutos] = useState([]);
   const [orcamentos, setOrcamentos] = useState([]);
   const [materiais, setMateriais] = useState([]);
   const [servicos, setServicos] = useState([]);
   const [colaboradores, setColaboradores] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
 
-  useEffect(() => {
-    setProdutos(getProdutos());
-    setOrcamentos(getOrcamentos());
-    setMateriais(getMateriais());
-    setServicos(getServicos());
-    setColaboradores(getColaboradores());
+  const carregar = useCallback(async () => {
+    setLoadingData(true);
+    try {
+      const [p, o, m, s, c] = await Promise.all([
+        getProdutos(), getOrcamentos(), getMateriais(), getServicos(), getColaboradores()
+      ]);
+      setProdutos(p); setOrcamentos(o); setMateriais(m); setServicos(s); setColaboradores(c);
+    } catch (e) { console.error(e); }
+    setLoadingData(false);
   }, []);
+
+  useEffect(() => { carregar(); }, [carregar]);
 
   const tabs = [
     { id: 'orcamento', label: '📋 Orçamento' },
@@ -37,45 +164,123 @@ export default function Home() {
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
             <h1 className="text-base font-semibold text-gray-900">Sistema de Fardamento</h1>
-            <p className="text-xs text-gray-400">Gestão de custos e orçamentos</p>
+            <p className="text-xs text-gray-400">{user.user_metadata?.nome || user.email}</p>
           </div>
-          <div className="flex gap-1 flex-wrap">
+          <div className="flex gap-1 flex-wrap items-center">
             {tabs.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t.id ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
                 {t.label}
               </button>
             ))}
+            <button
+              onClick={signOut}
+              className="ml-2 px-3 py-1.5 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-colors"
+              title="Sair"
+            >⎋ Sair</button>
           </div>
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-6">
-        {tab === 'orcamento' && <OrcamentoTab produtos={produtos} orcamentos={orcamentos} setOrcamentos={v => { setOrcamentos(v); saveOrcamentos(v); }} />}
-        {tab === 'produtos' && (
-          <ProdutosTab
-            produtos={produtos}
-            setProdutos={v => { setProdutos(v); saveProdutos(v); }}
-            materiais={materiais}
-            servicos={servicos}
-          />
+        {loadingData ? (
+          <div className="text-center py-20 text-gray-400 text-sm">Carregando dados...</div>
+        ) : (
+          <>
+            {tab === 'orcamento' && (
+              <OrcamentoTab
+                produtos={produtos}
+                orcamentos={orcamentos}
+                onSaveOrcamento={async (o) => {
+                  const salvo = await saveOrcamento(o);
+                  setOrcamentos(prev => [salvo, ...prev.filter(x => x.id !== salvo.id)]);
+                }}
+              />
+            )}
+            {tab === 'produtos' && (
+              <ProdutosTab
+                produtos={produtos}
+                materiais={materiais}
+                servicos={servicos}
+                onSave={async (p) => {
+                  const salvo = await saveProduto(p);
+                  setProdutos(prev => prev.find(x => x.id === salvo.id)
+                    ? prev.map(x => x.id === salvo.id ? salvo : x)
+                    : [...prev, salvo]);
+                }}
+                onDelete={async (id) => {
+                  await deleteProduto(id);
+                  setProdutos(prev => prev.filter(x => x.id !== id));
+                }}
+              />
+            )}
+            {tab === 'materiais' && (
+              <MateriaisTab
+                materiais={materiais} setMateriais={setMateriais}
+                servicos={servicos} setServicos={setServicos}
+                onSaveMaterial={async (m) => {
+                  const salvo = await saveMaterial(m);
+                  setMateriais(prev => prev.find(x => x.id === salvo.id)
+                    ? prev.map(x => x.id === salvo.id ? salvo : x)
+                    : [...prev, salvo]);
+                }}
+                onDeleteMaterial={async (id) => {
+                  await deleteMaterial(id);
+                  setMateriais(prev => prev.filter(x => x.id !== id));
+                }}
+                onSaveServico={async (s) => {
+                  const salvo = await saveServico(s);
+                  setServicos(prev => prev.find(x => x.id === salvo.id)
+                    ? prev.map(x => x.id === salvo.id ? salvo : x)
+                    : [...prev, salvo]);
+                }}
+                onDeleteServico={async (id) => {
+                  await deleteServico(id);
+                  setServicos(prev => prev.filter(x => x.id !== id));
+                }}
+              />
+            )}
+            {tab === 'historico' && (
+              <HistoricoTab
+                orcamentos={orcamentos}
+                produtos={produtos}
+                onDelete={async (id) => {
+                  await deleteOrcamento(id);
+                  setOrcamentos(prev => prev.filter(x => x.id !== id));
+                }}
+              />
+            )}
+            {tab === 'colaboradores' && (
+              <ColaboradoresTab
+                colaboradores={colaboradores}
+                onSave={async (c) => {
+                  const salvo = await saveColaborador(c);
+                  setColaboradores(prev => prev.find(x => x.id === salvo.id)
+                    ? prev.map(x => x.id === salvo.id ? salvo : x)
+                    : [...prev, salvo]);
+                }}
+                onDelete={async (id) => {
+                  await deleteColaborador(id);
+                  setColaboradores(prev => prev.filter(x => x.id !== id));
+                }}
+              />
+            )}
+          </>
         )}
-        {tab === 'materiais' && <MateriaisTab materiais={materiais} setMateriais={v => { setMateriais(v); saveMateriais(v); }} servicos={servicos} setServicos={v => { setServicos(v); saveServicos(v); }} />}
-        {tab === 'historico' && <HistoricoTab orcamentos={orcamentos} setOrcamentos={v => { setOrcamentos(v); saveOrcamentos(v); }} produtos={produtos} />}
-        {tab === 'colaboradores' && <ColaboradoresTab colaboradores={colaboradores} setColaboradores={v => { setColaboradores(v); saveColaboradores(v); }} />}
       </main>
     </div>
   );
 }
 
-// ─── ORÇAMENTO ───────────────────────────────────────────────────────────────
-function OrcamentoTab({ produtos, orcamentos, setOrcamentos }) {
+// ─── ORÇAMENTO ────────────────────────────────────────────────────────────────
+function OrcamentoTab({ produtos, orcamentos, onSaveOrcamento }) {
   const [cliente, setCliente] = useState('');
   const [data, setData] = useState(new Date().toISOString().split('T')[0]);
   const [obs, setObs] = useState('');
   const [itens, setItens] = useState([]);
   const [selProd, setSelProd] = useState('');
   const [venda, setVenda] = useState('');
+  const [salvando, setSalvando] = useState(false);
 
   const custoTotal = itens.reduce((a, it) => {
     const p = produtos.find(x => x.id === it.prodId);
@@ -84,7 +289,7 @@ function OrcamentoTab({ produtos, orcamentos, setOrcamentos }) {
   const lucro = (parseFloat(venda) || 0) - custoTotal;
 
   function addItem() {
-    const id = parseInt(selProd);
+    const id = selProd;
     if (!id) return;
     const p = produtos.find(x => x.id === id);
     if (!p) return;
@@ -98,33 +303,33 @@ function OrcamentoTab({ produtos, orcamentos, setOrcamentos }) {
 
   async function exportarPDF() {
     if (!cliente.trim() || !itens.length) { alert('Preencha cliente e adicione itens.'); return; }
-    const orc = { id: Date.now(), cliente, data, obs, itens, custoTotal, venda: parseFloat(venda) || 0, lucro };
+    const orc = { cliente, data, obs, itens, custo_total: custoTotal, venda: parseFloat(venda) || 0, lucro };
     const { exportarOrcamentoPDF } = await import('../lib/pdf');
     await exportarOrcamentoPDF(orc);
   }
 
-  function salvar() {
+  async function salvar() {
     if (!cliente.trim()) { alert('Informe o cliente'); return; }
     if (!itens.length) { alert('Adicione pelo menos um item'); return; }
-    const orc = { id: Date.now(), cliente, data, obs, itens: [...itens], custoTotal, venda: parseFloat(venda) || 0, lucro };
-    setOrcamentos([orc, ...orcamentos]);
-    setCliente(''); setItens([]); setVenda(''); setObs('');
-    alert('Orçamento salvo!');
+    setSalvando(true);
+    try {
+      const orc = { cliente, data, obs, itens: [...itens], custo_total: custoTotal, venda: parseFloat(venda) || 0, lucro };
+      await onSaveOrcamento(orc);
+      setCliente(''); setItens([]); setVenda(''); setObs('');
+      alert('Orçamento salvo!');
+    } catch (e) { alert('Erro ao salvar: ' + e.message); }
+    setSalvando(false);
   }
 
   return (
     <div className="space-y-4">
       <Card title="Dados do Pedido">
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Cliente">
-            <input value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nome do cliente" className={inp} />
-          </Field>
-          <Field label="Data">
-            <input type="date" value={data} onChange={e => setData(e.target.value)} className={inp} />
-          </Field>
+          <Field label="Cliente"><input value={cliente} onChange={e => setCliente(e.target.value)} placeholder="Nome do cliente" className={inp} /></Field>
+          <Field label="Data"><input type="date" value={data} onChange={e => setData(e.target.value)} className={inp} /></Field>
         </div>
         <Field label="Observações" className="mt-3">
-          <input value={obs} onChange={e => setObs(e.target.value)} placeholder="Observações para o orçamento..." className={inp} />
+          <input value={obs} onChange={e => setObs(e.target.value)} placeholder="Observações..." className={inp} />
         </Field>
       </Card>
 
@@ -138,7 +343,6 @@ function OrcamentoTab({ produtos, orcamentos, setOrcamentos }) {
           </select>
           <button onClick={addItem} className={btnPrimary}>+ Adicionar</button>
         </div>
-
         {itens.length === 0 && <p className="text-center text-gray-400 text-sm py-6">Nenhum item adicionado</p>}
         <div className="space-y-2">
           {itens.map((it, i) => {
@@ -166,111 +370,63 @@ function OrcamentoTab({ produtos, orcamentos, setOrcamentos }) {
           <Metric label="Lucro" value={fmt(lucro)} color={lucro >= 0 ? 'text-emerald-700' : 'text-red-600'} />
         </div>
         <Field label="Preço de venda ao cliente (você define)">
-          <input type="number" step="0.01" value={venda} onChange={e => setVenda(e.target.value)}
-            placeholder="0,00" className={`${inp} text-lg font-semibold`} />
+          <input type="number" step="0.01" value={venda} onChange={e => setVenda(e.target.value)} placeholder="0,00" className={`${inp} text-lg font-semibold`} />
         </Field>
       </Card>
 
       <div className="flex gap-3 justify-end">
         <button onClick={() => { setItens([]); setVenda(''); setCliente(''); }} className={btnSecondary}>Limpar</button>
-        <button onClick={exportarPDF} className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600">
-          📄 Exportar PDF
-        </button>
-        <button onClick={salvar} className={btnPrimary}>✓ Salvar Orçamento</button>
+        <button onClick={exportarPDF} className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600">📄 Exportar PDF</button>
+        <button onClick={salvar} disabled={salvando} className={`${btnPrimary} disabled:opacity-50`}>{salvando ? 'Salvando...' : '✓ Salvar Orçamento'}</button>
       </div>
     </div>
   );
 }
 
 // ─── PRODUTOS ────────────────────────────────────────────────────────────────
-function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
+function ProdutosTab({ produtos, materiais, servicos, onSave, onDelete }) {
   const [form, setForm] = useState(null);
-  // 'banco' = selecionar do banco | 'manual' = digitar livre
   const [addMode, setAddMode] = useState(null);
-  // estado temporário do item sendo adicionado via banco
   const [itemBanco, setItemBanco] = useState({ tipo: 'servico', refId: '', quantidade: 1 });
+  const [salvando, setSalvando] = useState(false);
 
-  function openNovo() {
-    setForm({ nome: '', tipo: 'Camisa Polo', imposto: 7, custos: [] });
-    setAddMode(null);
-  }
-  function openEditar(p) {
-    setForm({ ...p, imposto: (p.imposto || 0.07) * 100, custos: p.custos.map(c => ({ ...c })) });
-    setAddMode(null);
-  }
-  function salvar() {
+  function openNovo() { setForm({ nome: '', tipo: 'Camisa Polo', imposto: 7, custos: [] }); setAddMode(null); }
+  function openEditar(p) { setForm({ ...p, imposto: (p.imposto || 0.07) * 100, custos: p.custos.map(c => ({ ...c })) }); setAddMode(null); }
+
+  async function salvar() {
     if (!form.nome.trim()) { alert('Informe o nome'); return; }
-    const p = { ...form, imposto: (parseFloat(form.imposto) || 7) / 100 };
-    if (p.id) {
-      setProdutos(produtos.map(x => x.id === p.id ? p : x));
-    } else {
-      setProdutos([...produtos, { ...p, id: Date.now() }]);
-    }
-    setForm(null);
-    setAddMode(null);
-  }
-  function excluir(id) {
-    if (!confirm('Excluir produto?')) return;
-    setProdutos(produtos.filter(p => p.id !== id));
+    setSalvando(true);
+    try {
+      const p = { ...form, imposto: (parseFloat(form.imposto) || 7) / 100 };
+      await onSave(p);
+      setForm(null); setAddMode(null);
+    } catch (e) { alert('Erro ao salvar: ' + e.message); }
+    setSalvando(false);
   }
 
-  // Confirma adição do item do banco
   function confirmarItemBanco() {
-    const refId = parseInt(itemBanco.refId);
+    const refId = itemBanco.refId;
     if (!refId) { alert('Selecione um item'); return; }
     const qtd = parseFloat(itemBanco.quantidade) || 1;
-
+    const lista = itemBanco.tipo === 'material' ? materiais : servicos;
+    const item = lista.find(x => x.id === refId);
+    if (!item) return;
     let novoItem;
     if (itemBanco.tipo === 'material') {
-      const m = materiais.find(x => x.id === refId);
-      if (!m) return;
-      novoItem = {
-        tipo: 'material',
-        refId: m.id,
-        nome: m.nome,
-        quantidade: qtd,
-        valorRef: parseFloat(m.valor),
-        rendimento: parseFloat(m.rendimento) || 1,
-        medida: m.medida,
-      };
+      novoItem = { tipo: 'material', refId: item.id, nome: item.nome, quantidade: qtd, valorRef: parseFloat(item.valor), rendimento: parseFloat(item.rendimento) || 1, medida: item.medida };
     } else {
-      const s = servicos.find(x => x.id === refId);
-      if (!s) return;
-      novoItem = {
-        tipo: 'servico',
-        refId: s.id,
-        nome: s.nome,
-        quantidade: qtd,
-        valorRef: parseFloat(s.valor),
-        medida: s.medida,
-      };
+      novoItem = { tipo: 'servico', refId: item.id, nome: item.nome, quantidade: qtd, valorRef: parseFloat(item.valor), medida: item.medida };
     }
-
     setForm({ ...form, custos: [...form.custos, novoItem] });
     setItemBanco({ tipo: 'servico', refId: '', quantidade: 1 });
     setAddMode(null);
   }
 
-  // Adiciona item manual
-  function confirmarItemManual() {
-    setForm({
-      ...form,
-      custos: [...form.custos, { tipo: 'manual', nome: '', quantidade: 1, valorManual: '' }]
-    });
-    setAddMode(null);
-  }
-
-  // Atualiza campo de um custo existente
   function updateCusto(i, campo, valor) {
-    setForm({
-      ...form,
-      custos: form.custos.map((c, j) => j === i ? { ...c, [campo]: valor } : c)
-    });
+    setForm({ ...form, custos: form.custos.map((c, j) => j === i ? { ...c, [campo]: valor } : c) });
   }
 
   const subtotal = form ? form.custos.reduce((a, c) => a + custoItem(c), 0) : 0;
-
-  // Lista combinada para o seletor do banco
   const listaBanco = itemBanco.tipo === 'material' ? materiais : servicos;
 
   return (
@@ -282,11 +438,8 @@ function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
 
       {form && (
         <Card title={form.id ? `Editando: ${form.nome}` : 'Novo Produto'}>
-          {/* Campos base */}
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <Field label="Nome">
-              <input value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} className={inp} placeholder="Nome do produto" />
-            </Field>
+            <Field label="Nome"><input value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} className={inp} placeholder="Nome do produto" /></Field>
             <Field label="Tipo">
               <select value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })} className={inp}>
                 {['Camisa Polo', 'Camisa Social', 'Camiseta', 'Jaleco', 'Bermuda', 'Calça', 'Outro'].map(t => <option key={t}>{t}</option>)}
@@ -297,83 +450,48 @@ function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
             <input type="number" value={form.imposto} onChange={e => setForm({ ...form, imposto: e.target.value })} className={`${inp} w-32`} />
           </Field>
 
-          {/* Composição */}
           <div className="mt-5">
             <div className="flex justify-between items-center mb-3">
               <span className="text-sm font-semibold text-gray-800">Composição de Custos</span>
               <div className="flex gap-2">
-                <button
-                  onClick={() => setAddMode(addMode === 'banco' ? null : 'banco')}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${addMode === 'banco' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'}`}
-                >
+                <button onClick={() => setAddMode(addMode === 'banco' ? null : 'banco')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${addMode === 'banco' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'}`}>
                   🧵 Do banco
                 </button>
-                <button
-                  onClick={() => {
-                    setAddMode(null);
-                    setForm({ ...form, custos: [...form.custos, { tipo: 'manual', nome: '', quantidade: 1, valorManual: '' }] });
-                  }}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors"
-                >
+                <button onClick={() => { setAddMode(null); setForm({ ...form, custos: [...form.custos, { tipo: 'manual', nome: '', quantidade: 1, valorManual: '' }] }); }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 transition-colors">
                   ✏️ Manual
                 </button>
               </div>
             </div>
 
-            {/* Painel seleção do banco */}
             {addMode === 'banco' && (
               <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
                 <p className="text-xs font-semibold text-emerald-800 mb-2">Adicionar do banco</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {/* Tipo: material ou serviço */}
                   <Field label="Tipo">
-                    <select
-                      value={itemBanco.tipo}
-                      onChange={e => setItemBanco({ tipo: e.target.value, refId: '', quantidade: 1 })}
-                      className={inp}
-                    >
+                    <select value={itemBanco.tipo} onChange={e => setItemBanco({ tipo: e.target.value, refId: '', quantidade: 1 })} className={inp}>
                       <option value="servico">🪡 Serviço</option>
                       <option value="material">🧵 Material</option>
                     </select>
                   </Field>
-
-                  {/* Item do banco */}
                   <Field label={itemBanco.tipo === 'material' ? 'Material' : 'Serviço'}>
-                    <select
-                      value={itemBanco.refId}
-                      onChange={e => setItemBanco({ ...itemBanco, refId: e.target.value })}
-                      className={inp}
-                    >
+                    <select value={itemBanco.refId} onChange={e => setItemBanco({ ...itemBanco, refId: e.target.value })} className={inp}>
                       <option value="">Selecione...</option>
-                      {listaBanco.map(x => {
-                        const rend = itemBanco.tipo === 'material' && x.rendimento
-                          ? ` (rend. ${x.rendimento})`
-                          : '';
-                        return (
-                          <option key={x.id} value={x.id}>
-                            {x.nome} — {fmt(x.valor)}/{x.medida}{rend}
-                          </option>
-                        );
-                      })}
+                      {listaBanco.map(x => (
+                        <option key={x.id} value={x.id}>
+                          {x.nome} — {fmt(x.valor)}/{x.medida}{itemBanco.tipo === 'material' && x.rendimento ? ` (rend.${x.rendimento})` : ''}
+                        </option>
+                      ))}
                     </select>
                   </Field>
-
-                  {/* Quantidade */}
-                  <Field label={itemBanco.tipo === 'material' ? 'Quantidade (Kg/m/un)' : 'Quantidade (peças)'}>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      value={itemBanco.quantidade}
-                      onChange={e => setItemBanco({ ...itemBanco, quantidade: e.target.value })}
-                      className={inp}
-                    />
+                  <Field label="Quantidade">
+                    <input type="number" step="0.01" min="0.01" value={itemBanco.quantidade}
+                      onChange={e => setItemBanco({ ...itemBanco, quantidade: e.target.value })} className={inp} />
                   </Field>
                 </div>
-
-                {/* Preview do custo */}
                 {itemBanco.refId && (() => {
-                  const item = listaBanco.find(x => x.id === parseInt(itemBanco.refId));
+                  const item = listaBanco.find(x => x.id === itemBanco.refId);
                   if (!item) return null;
                   const qtd = parseFloat(itemBanco.quantidade) || 1;
                   let custo, formula;
@@ -392,15 +510,13 @@ function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
                     </div>
                   );
                 })()}
-
                 <div className="flex gap-2 justify-end mt-2">
-                  <button onClick={() => setAddMode(null)} className={btnSecondary + ' text-xs py-1 px-3'}>Cancelar</button>
-                  <button onClick={confirmarItemBanco} className={btnPrimary + ' text-xs py-1 px-3'}>+ Adicionar</button>
+                  <button onClick={() => setAddMode(null)} className={`${btnSecondary} text-xs py-1 px-3`}>Cancelar</button>
+                  <button onClick={confirmarItemBanco} className={`${btnPrimary} text-xs py-1 px-3`}>+ Adicionar</button>
                 </div>
               </div>
             )}
 
-            {/* Lista de itens da composição */}
             {form.custos.length === 0 && addMode !== 'banco' && (
               <p className="text-sm text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">
                 Clique em "🧵 Do banco" ou "✏️ Manual" para adicionar itens
@@ -408,95 +524,51 @@ function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
             )}
 
             <div className="space-y-2">
-              {/* Header */}
               {form.custos.length > 0 && (
                 <div className="grid grid-cols-12 gap-2 px-1 mb-1">
-                  <span className="col-span-5 text-xs font-medium text-gray-400 uppercase tracking-wide">Item</span>
-                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase tracking-wide text-center">Qtd</span>
-                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase tracking-wide text-right">Valor unit.</span>
-                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase tracking-wide text-right">Custo</span>
+                  <span className="col-span-5 text-xs font-medium text-gray-400 uppercase">Item</span>
+                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-center">Qtd</span>
+                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Valor unit.</span>
+                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Custo</span>
                   <span className="col-span-1"></span>
                 </div>
               )}
-
               {form.custos.map((c, i) => {
                 const custo = custoItem(c);
-                const badge = c.tipo === 'material'
-                  ? 'bg-blue-50 text-blue-600'
-                  : c.tipo === 'servico'
-                    ? 'bg-purple-50 text-purple-600'
-                    : 'bg-gray-100 text-gray-500';
-                const badgeLabel = c.tipo === 'material' ? 'material' : c.tipo === 'servico' ? 'serviço' : 'manual';
-
+                const badge = c.tipo === 'material' ? 'bg-blue-50 text-blue-600' : c.tipo === 'servico' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-500';
                 return (
                   <div key={i} className="grid grid-cols-12 gap-2 items-center bg-gray-50 rounded-lg px-2 py-2">
-                    {/* Nome */}
                     <div className="col-span-5 flex items-center gap-1.5 min-w-0">
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${badge}`}>{badgeLabel}</span>
-                      {c.tipo === 'manual' ? (
-                        <input
-                          value={c.nome}
-                          onChange={e => updateCusto(i, 'nome', e.target.value)}
-                          placeholder="Nome do item..."
-                          className="text-xs border border-gray-200 rounded px-2 py-1 flex-1 min-w-0 bg-white"
-                        />
-                      ) : (
-                        <span className="text-xs font-medium text-gray-800 truncate">{c.nome}</span>
-                      )}
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${badge}`}>
+                        {c.tipo === 'material' ? 'mat' : c.tipo === 'servico' ? 'svc' : 'man'}
+                      </span>
+                      {c.tipo === 'manual'
+                        ? <input value={c.nome} onChange={e => updateCusto(i, 'nome', e.target.value)} placeholder="Nome..." className="text-xs border border-gray-200 rounded px-2 py-1 flex-1 min-w-0 bg-white" />
+                        : <span className="text-xs font-medium text-gray-800 truncate">{c.nome}</span>
+                      }
                     </div>
-
-                    {/* Quantidade */}
                     <div className="col-span-2">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        value={c.quantidade}
+                      <input type="number" step="0.01" min="0.01" value={c.quantidade}
                         onChange={e => updateCusto(i, 'quantidade', parseFloat(e.target.value) || 1)}
-                        className="w-full text-center text-xs border border-gray-200 rounded-md py-1 bg-white"
-                      />
+                        className="w-full text-center text-xs border border-gray-200 rounded-md py-1 bg-white" />
                     </div>
-
-                    {/* Valor unitário — editável só no manual */}
                     <div className="col-span-2 text-right">
-                      {c.tipo === 'manual' ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={c.valorManual}
-                          onChange={e => updateCusto(i, 'valorManual', e.target.value)}
-                          placeholder="0,00"
-                          className="w-full text-right text-xs border border-gray-200 rounded-md py-1 bg-white"
-                        />
-                      ) : (
-                        <span className="text-xs text-gray-500">
-                          {c.tipo === 'material'
-                            ? `${fmt(c.valorRef)}/${c.medida}÷${c.rendimento}`
-                            : fmt(c.valorRef)}
-                        </span>
-                      )}
+                      {c.tipo === 'manual'
+                        ? <input type="number" step="0.01" min="0" value={c.valorManual} onChange={e => updateCusto(i, 'valorManual', e.target.value)} placeholder="0,00" className="w-full text-right text-xs border border-gray-200 rounded-md py-1 bg-white" />
+                        : <span className="text-xs text-gray-500">{c.tipo === 'material' ? `${fmt(c.valorRef)}/${c.medida}÷${c.rendimento}` : fmt(c.valorRef)}</span>
+                      }
                     </div>
-
-                    {/* Custo calculado */}
                     <div className="col-span-2 text-right">
                       <span className="text-sm font-semibold text-emerald-700">{fmt(custo)}</span>
                     </div>
-
-                    {/* Remover */}
                     <div className="col-span-1 flex justify-center">
-                      <button
-                        onClick={() => setForm({ ...form, custos: form.custos.filter((_, j) => j !== i) })}
-                        className="text-red-400 hover:text-red-600 text-base leading-none"
-                        title="Remover"
-                      >✕</button>
+                      <button onClick={() => setForm({ ...form, custos: form.custos.filter((_, j) => j !== i) })} className="text-red-400 hover:text-red-600 text-base">✕</button>
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Totais */}
             {form.custos.length > 0 && (
               <div className="mt-3 pt-2 border-t border-gray-200 space-y-1">
                 <div className="flex justify-between text-xs text-gray-500">
@@ -517,12 +589,11 @@ function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
 
           <div className="flex gap-2 justify-end mt-4">
             <button onClick={() => { setForm(null); setAddMode(null); }} className={btnSecondary}>Cancelar</button>
-            <button onClick={salvar} className={btnPrimary}>Salvar</button>
+            <button onClick={salvar} disabled={salvando} className={`${btnPrimary} disabled:opacity-50`}>{salvando ? 'Salvando...' : 'Salvar'}</button>
           </div>
         </Card>
       )}
 
-      {/* Lista de produtos cadastrados */}
       <div className="space-y-3">
         {produtos.map(p => {
           const custo = custoProduto(p);
@@ -538,22 +609,16 @@ function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-emerald-700">{fmt(custo)}</span>
                   <button onClick={() => openEditar(p)} className="text-xs text-blue-500 hover:text-blue-700">✏️</button>
-                  <button onClick={() => excluir(p.id)} className="text-xs text-red-400 hover:text-red-600">🗑️</button>
+                  <button onClick={() => { if (confirm('Excluir produto?')) onDelete(p.id); }} className="text-xs text-red-400 hover:text-red-600">🗑️</button>
                 </div>
               </div>
               <div className="border-t border-gray-100 pt-2 grid grid-cols-2 gap-x-4 gap-y-1">
                 {(p.custos || []).map((c, i) => {
-                  const badge = c.tipo === 'material'
-                    ? 'bg-blue-50 text-blue-600'
-                    : c.tipo === 'servico'
-                      ? 'bg-purple-50 text-purple-600'
-                      : 'bg-gray-100 text-gray-500';
+                  const badge = c.tipo === 'material' ? 'bg-blue-50 text-blue-600' : c.tipo === 'servico' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-500';
                   return (
                     <div key={i} className="flex justify-between items-center text-xs gap-1">
                       <div className="flex items-center gap-1 min-w-0">
-                        <span className={`text-[9px] px-1 py-0.5 rounded-full flex-shrink-0 font-semibold ${badge}`}>
-                          {c.tipo === 'material' ? 'mat' : c.tipo === 'servico' ? 'svc' : 'man'}
-                        </span>
+                        <span className={`text-[9px] px-1 py-0.5 rounded-full flex-shrink-0 font-semibold ${badge}`}>{c.tipo === 'material' ? 'mat' : c.tipo === 'servico' ? 'svc' : 'man'}</span>
                         <span className="text-gray-500 truncate">{c.nome}</span>
                         {c.quantidade !== 1 && <span className="text-gray-400 flex-shrink-0">×{c.quantidade}</span>}
                       </div>
@@ -574,21 +639,24 @@ function ProdutosTab({ produtos, setProdutos, materiais, servicos }) {
   );
 }
 
-// ─── MATERIAIS ───────────────────────────────────────────────────────────────
-function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
+// ─── MATERIAIS ────────────────────────────────────────────────────────────────
+function MateriaisTab({ materiais, servicos, onSaveMaterial, onDeleteMaterial, onSaveServico, onDeleteServico }) {
   const [subTab, setSubTab] = useState('materiais');
   const [editM, setEditM] = useState(null);
   const [editS, setEditS] = useState(null);
+  const [salvando, setSalvando] = useState(false);
 
-  function salvarMaterial(m) {
-    if (m.id && materiais.find(x => x.id === m.id)) setMateriais(materiais.map(x => x.id === m.id ? m : x));
-    else setMateriais([...materiais, { ...m, id: Date.now() }]);
-    setEditM(null);
+  async function handleSalvarMaterial() {
+    setSalvando(true);
+    try { await onSaveMaterial(editM); setEditM(null); }
+    catch (e) { alert('Erro: ' + e.message); }
+    setSalvando(false);
   }
-  function salvarServico(s) {
-    if (s.id && servicos.find(x => x.id === s.id)) setServicos(servicos.map(x => x.id === s.id ? s : x));
-    else setServicos([...servicos, { ...s, id: Date.now() }]);
-    setEditS(null);
+  async function handleSalvarServico() {
+    setSalvando(true);
+    try { await onSaveServico(editS); setEditS(null); }
+    catch (e) { alert('Erro: ' + e.message); }
+    setSalvando(false);
   }
 
   return (
@@ -615,7 +683,7 @@ function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
               </div>
               <div className="flex gap-2 justify-end mt-3">
                 <button onClick={() => setEditM(null)} className={btnSecondary}>Cancelar</button>
-                <button onClick={() => salvarMaterial(editM)} className={btnPrimary}>Salvar</button>
+                <button onClick={handleSalvarMaterial} disabled={salvando} className={`${btnPrimary} disabled:opacity-50`}>{salvando ? 'Salvando...' : 'Salvar'}</button>
               </div>
             </Card>
           )}
@@ -626,7 +694,6 @@ function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
                 <th className="text-right p-3 text-xs text-gray-500 font-medium">Valor</th>
                 <th className="text-center p-3 text-xs text-gray-500 font-medium">Medida</th>
                 <th className="text-center p-3 text-xs text-gray-500 font-medium">Rendimento</th>
-                <th className="text-center p-3 text-xs text-gray-500 font-medium">Consumo/peça</th>
                 <th className="p-3"></th>
               </tr></thead>
               <tbody>
@@ -636,10 +703,9 @@ function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
                     <td className="p-3 text-right text-emerald-700 font-semibold">{fmt(m.valor)}</td>
                     <td className="p-3 text-center text-gray-500">{m.medida}</td>
                     <td className="p-3 text-center text-gray-500">{m.rendimento || '—'}</td>
-                    <td className="p-3 text-center text-gray-500">{m.consumo || '—'}</td>
                     <td className="p-3 text-right">
                       <button onClick={() => setEditM({ ...m })} className="text-blue-400 hover:text-blue-600 mr-2 text-xs">✏️</button>
-                      <button onClick={() => setMateriais(materiais.filter(x => x.id !== m.id))} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
+                      <button onClick={() => { if (confirm('Excluir?')) onDeleteMaterial(m.id); }} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
                     </td>
                   </tr>
                 ))}
@@ -663,7 +729,7 @@ function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
               </div>
               <div className="flex gap-2 justify-end mt-3">
                 <button onClick={() => setEditS(null)} className={btnSecondary}>Cancelar</button>
-                <button onClick={() => salvarServico(editS)} className={btnPrimary}>Salvar</button>
+                <button onClick={handleSalvarServico} disabled={salvando} className={`${btnPrimary} disabled:opacity-50`}>{salvando ? 'Salvando...' : 'Salvar'}</button>
               </div>
             </Card>
           )}
@@ -681,7 +747,7 @@ function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
                     <td className="p-3 text-right text-emerald-700 font-semibold">{fmt(s.valor)}</td>
                     <td className="p-3 text-right">
                       <button onClick={() => setEditS({ ...s })} className="text-blue-400 hover:text-blue-600 mr-2 text-xs">✏️</button>
-                      <button onClick={() => setServicos(servicos.filter(x => x.id !== s.id))} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
+                      <button onClick={() => { if (confirm('Excluir?')) onDeleteServico(s.id); }} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
                     </td>
                   </tr>
                 ))}
@@ -694,24 +760,22 @@ function MateriaisTab({ materiais, setMateriais, servicos, setServicos }) {
   );
 }
 
-// ─── HISTÓRICO ───────────────────────────────────────────────────────────────
-function HistoricoTab({ orcamentos, setOrcamentos, produtos }) {
+// ─── HISTÓRICO ────────────────────────────────────────────────────────────────
+function HistoricoTab({ orcamentos, produtos, onDelete }) {
   async function exportar(orc) {
     const { exportarOrcamentoPDF } = await import('../lib/pdf');
     await exportarOrcamentoPDF(orc);
   }
-
   if (!orcamentos.length) return (
-    <div className="text-center py-16 text-gray-400">
-      <div className="text-4xl mb-2">📭</div>
-      <p>Nenhum orçamento salvo ainda</p>
-    </div>
+    <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-2">📭</div><p>Nenhum orçamento salvo ainda</p></div>
   );
-
   return (
     <div className="space-y-4">
       {orcamentos.map(orc => {
-        const roi = orc.custoTotal > 0 ? (orc.lucro / orc.custoTotal * 100) : 0;
+        const custoTotal = parseFloat(orc.custo_total || orc.custoTotal || 0);
+        const lucro = parseFloat(orc.lucro || 0);
+        const venda = parseFloat(orc.venda || 0);
+        const roi = custoTotal > 0 ? (lucro / custoTotal * 100) : 0;
         return (
           <Card key={orc.id}>
             <div className="flex justify-between items-start mb-3">
@@ -720,11 +784,11 @@ function HistoricoTab({ orcamentos, setOrcamentos, produtos }) {
                 <span className="ml-2 text-xs text-gray-400">{orc.data}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">Custo {fmt(orc.custoTotal)}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${orc.lucro >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>Lucro {fmt(orc.lucro)}</span>
+                <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">Custo {fmt(custoTotal)}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${lucro >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>Lucro {fmt(lucro)}</span>
                 <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">ROI {roi.toFixed(1)}%</span>
                 <button onClick={() => exportar(orc)} className="text-xs text-orange-500 hover:text-orange-700">📄 PDF</button>
-                <button onClick={() => { if (confirm('Excluir?')) setOrcamentos(orcamentos.filter(x => x.id !== orc.id)); }} className="text-xs text-red-400 hover:text-red-600">🗑️</button>
+                <button onClick={() => { if (confirm('Excluir?')) onDelete(orc.id); }} className="text-xs text-red-400 hover:text-red-600">🗑️</button>
               </div>
             </div>
             <div className="border-t border-gray-100 pt-2">
@@ -733,10 +797,10 @@ function HistoricoTab({ orcamentos, setOrcamentos, produtos }) {
                   <th className="text-left pb-1">Produto</th>
                   <th className="text-center pb-1">Qtd</th>
                   <th className="text-right pb-1">Custo unit.</th>
-                  <th className="text-right pb-1">Total custo</th>
+                  <th className="text-right pb-1">Total</th>
                 </tr></thead>
                 <tbody>
-                  {orc.itens.map((it, i) => {
+                  {(orc.itens || []).map((it, i) => {
                     const p = produtos.find(x => x.id === it.prodId);
                     const cu = p ? custoProduto(p) : 0;
                     return (
@@ -751,8 +815,8 @@ function HistoricoTab({ orcamentos, setOrcamentos, produtos }) {
                 </tbody>
               </table>
               <div className="flex justify-end gap-4 text-xs mt-2 pt-2 border-t border-gray-100">
-                <span className="text-gray-500">Venda: <strong className="text-gray-800">{fmt(orc.venda)}</strong></span>
-                <span className="text-gray-500">Lucro: <strong className={orc.lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}>{fmt(orc.lucro)}</strong></span>
+                <span className="text-gray-500">Venda: <strong className="text-gray-800">{fmt(venda)}</strong></span>
+                <span className="text-gray-500">Lucro: <strong className={lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}>{fmt(lucro)}</strong></span>
               </div>
             </div>
           </Card>
@@ -762,14 +826,16 @@ function HistoricoTab({ orcamentos, setOrcamentos, produtos }) {
   );
 }
 
-// ─── COLABORADORES ───────────────────────────────────────────────────────────
-function ColaboradoresTab({ colaboradores, setColaboradores }) {
+// ─── COLABORADORES ────────────────────────────────────────────────────────────
+function ColaboradoresTab({ colaboradores, onSave, onDelete }) {
   const [form, setForm] = useState(null);
-  function salvar() {
+  const [salvando, setSalvando] = useState(false);
+  async function salvar() {
     if (!form.nome.trim()) { alert('Informe o nome'); return; }
-    if (form.id) setColaboradores(colaboradores.map(x => x.id === form.id ? form : x));
-    else setColaboradores([...colaboradores, { ...form, id: Date.now() }]);
-    setForm(null);
+    setSalvando(true);
+    try { await onSave(form); setForm(null); }
+    catch (e) { alert('Erro: ' + e.message); }
+    setSalvando(false);
   }
   return (
     <div className="space-y-4">
@@ -785,7 +851,7 @@ function ColaboradoresTab({ colaboradores, setColaboradores }) {
           </div>
           <div className="flex gap-2 justify-end mt-3">
             <button onClick={() => setForm(null)} className={btnSecondary}>Cancelar</button>
-            <button onClick={salvar} className={btnPrimary}>Salvar</button>
+            <button onClick={salvar} disabled={salvando} className={`${btnPrimary} disabled:opacity-50`}>{salvando ? 'Salvando...' : 'Salvar'}</button>
           </div>
         </Card>
       )}
@@ -798,7 +864,7 @@ function ColaboradoresTab({ colaboradores, setColaboradores }) {
             </div>
             <div className="flex gap-2">
               <button onClick={() => setForm({ ...c })} className="text-blue-400 hover:text-blue-600 text-xs">✏️</button>
-              <button onClick={() => { if (confirm('Excluir?')) setColaboradores(colaboradores.filter(x => x.id !== c.id)); }} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
+              <button onClick={() => { if (confirm('Excluir?')) onDelete(c.id); }} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
             </div>
           </div>
         ))}
@@ -807,7 +873,7 @@ function ColaboradoresTab({ colaboradores, setColaboradores }) {
   );
 }
 
-// ─── UI Primitives ────────────────────────────────────────────────────────────
+// ─── UI PRIMITIVOS ────────────────────────────────────────────────────────────
 function Card({ title, children }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4">
