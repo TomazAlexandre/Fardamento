@@ -31,15 +31,13 @@ Acesse: http://localhost:3000
 ## Dados incluídos da planilha (Tomaz)
 
 Materiais pré-cadastrados:
-- Jeans R$16/metro (consumo 1,3m)
-- Malha Piquet R$52,90/Kg (rendimento 4)
+- Jeans
+- Malha Piquet 
 - Malha PP (Mavil, Tico, Laecio, Costa Rica)
 - Faixas Refletivas, Ribana, Entretela, Botão, Etiqueta
 - ...e todos os serviços (Costura Polo, Social, Calça, Bordado, Pintura etc.)
 
-## Próximos passos (futuro)
-
-- [ ] Supabase para dados persistentes na nuvem (multi-dispositivo)
-- [ ] Fluxo de produção por pedido (status: corte → costura → bordado → entrega)
-- [ ] Tabela de tamanhos e metragem automática (P/M/G/GG)
-- [ ] Login simples com senha
+- [x] Supabase para dados persistentes na nuvem (multi-dispositivo)
+- [x] Fluxo de produção por pedido (status: corte → costura → bordado → entrega)
+- [x] Tabela de tamanhos e metragem automática (P/M/G/GG)
+- [x] Login simples com senha
