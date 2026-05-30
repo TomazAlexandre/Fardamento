@@ -163,6 +163,8 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
   }, 0);
   const vendaTotal = (parseFloat(vendaPorPeca) || 0) * totalQtd;
   const lucro = vendaTotal - custoTotal;
+  const margem = vendaTotal > 0 ? (lucro / vendaTotal * 100) : 0;
+  const roi = custoTotal > 0 ? (lucro / custoTotal * 100) : 0;
 
   function addItem() {
     const p = produtos.find(x => x.id === selProd); if (!p) return;
@@ -174,7 +176,7 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
   async function exportarInterno() {
     if (!cliente.trim() || !itens.length) { alert('Preencha cliente e adicione itens.'); return; }
     const { exportarOrcamentoPDF } = await import('../lib/pdf');
-    await exportarOrcamentoPDF({ cliente, data, obs, itens, custo_total: custoTotal, venda: vendaTotal, lucro }, produtos);
+    await exportarOrcamentoPDF({ cliente, data, obs, validade, pagamento, prazo, itens, custo_total: custoTotal, venda: vendaTotal, lucro }, produtos);
   }
 
   async function exportarExterno() {
@@ -216,23 +218,42 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
         <div className="flex gap-2 mb-4">
           <select value={selProd} onChange={e => setSelProd(e.target.value)} className={`${inp} flex-1`}>
             <option value="">Selecionar produto...</option>
-            {produtos.map(p => <option key={p.id} value={p.id}>{p.nome} — {fmt(custoProduto(p))}</option>)}
+            {produtos.map(p => <option key={p.id} value={p.id}>{p.nome} — custo {fmt(custoProduto(p))}</option>)}
           </select>
           <button onClick={addItem} className={btnPrimary}>+ Adicionar</button>
         </div>
         {itens.length === 0 && <p className="text-center text-gray-400 text-sm py-6">Nenhum item adicionado</p>}
         <div className="space-y-2">
           {itens.map((it, i) => {
-            const p = produtos.find(x => x.id === it.prodId); const cu = p ? custoProduto(p) : 0;
+            const p = produtos.find(x => x.id === it.prodId);
+            const custoUnit = p ? custoProduto(p) : 0;
+            const qtd = parseInt(it.qtd) || 0;
+            const custoTotalItem = custoUnit * qtd;
+            // preço de venda proporcional ao custo unitário
+            const custoMedio = custoTotal / (totalQtd || 1);
+            const vendaMedia = vendaTotal / (totalQtd || 1);
+            const vendaUnit = custoMedio > 0 ? (custoUnit / custoMedio) * vendaMedia : vendaMedia;
+            const vendaTotalItem = vendaUnit * qtd;
+            const lucroItem = vendaTotalItem - custoTotalItem;
+            const margemItem = vendaTotalItem > 0 ? (lucroItem / vendaTotalItem * 100) : 0;
             return (
-              <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
-                <span className="flex-1 text-sm font-medium text-gray-800">{it.nome}</span>
-                <span className="text-xs text-gray-400 w-24">Custo: {fmt(cu)}</span>
-                <input type="number" min="1" value={it.qtd}
-                  onChange={e => setItens(itens.map((x, j) => j === i ? { ...x, qtd: parseInt(e.target.value) || 1 } : x))}
-                  className="w-16 text-center border border-gray-200 rounded-md py-1 text-sm" />
-                <span className="text-sm font-semibold text-emerald-700 w-20 text-right">{fmt(cu * it.qtd)}</span>
-                <button onClick={() => setItens(itens.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>
+              <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5">
+                <div className="flex items-center gap-3">
+                  <span className="flex-1 text-sm font-medium text-gray-800">{it.nome}</span>
+                  <span className="text-xs text-gray-400">Custo unit: {fmt(custoUnit)}</span>
+                  <input type="number" min="1" value={it.qtd}
+                    onChange={e => setItens(itens.map((x, j) => j === i ? { ...x, qtd: parseInt(e.target.value) || 1 } : x))}
+                    className="w-16 text-center border border-gray-200 rounded-md py-1 text-sm bg-white" />
+                  <button onClick={() => setItens(itens.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>
+                </div>
+                {vendaTotal > 0 && (
+                  <div className="flex items-center gap-4 mt-1.5 text-xs">
+                    <span className="text-gray-500">Custo total: <strong className="text-gray-700">{fmt(custoTotalItem)}</strong></span>
+                    <span className="text-gray-500">Venda unit: <strong className="text-orange-600">{fmt(vendaUnit)}</strong></span>
+                    <span className="text-gray-500">Venda total: <strong className="text-orange-600">{fmt(vendaTotalItem)}</strong></span>
+                    <span className={`font-semibold ${margemItem >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>Margem: {margemItem.toFixed(1)}%</span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -240,12 +261,16 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
       </Card>
 
       <Card title="Resumo Financeiro">
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-4 gap-3 mb-4">
           <Metric label="Custo interno" value={fmt(custoTotal)} color="text-emerald-700" />
-          <Metric label="Valor de venda total" value={fmt(vendaTotal)} color="text-blue-700" />
+          <Metric label="Venda total" value={fmt(vendaTotal)} color="text-orange-600" />
           <Metric label="Lucro" value={fmt(lucro)} color={lucro >= 0 ? 'text-emerald-700' : 'text-red-600'} />
+          <div className="bg-gray-50 rounded-lg p-3">
+            <p className="text-xs text-gray-400 mb-1">Margem / ROI</p>
+            <p className={`text-base font-semibold ${lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{margem.toFixed(1)}% / {roi.toFixed(1)}%</p>
+          </div>
         </div>
-        <Field label={`Preço de venda por peça × ${totalQtd} peças = ${fmt(vendaTotal)}`}>
+        <Field label={`Preço por peça × ${totalQtd} peças = ${fmt(vendaTotal)}`}>
           <input type="number" step="0.01" value={vendaPorPeca} onChange={e => setVendaPorPeca(e.target.value)}
             placeholder="0,00 por peça" className={`${inp} text-lg font-semibold`} />
         </Field>
@@ -385,9 +410,7 @@ function ProdutosTab({ produtos, materiais, servicos, onSave, onDelete }) {
             )}
 
             {form.custos.length === 0 && addMode !== 'banco' && (
-              <p className="text-sm text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">
-                Clique em "🧵 Do banco" ou "✏️ Manual" para adicionar itens
-              </p>
+              <p className="text-sm text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">Clique em "🧵 Do banco" ou "✏️ Manual" para adicionar itens</p>
             )}
 
             <div className="space-y-2">
@@ -395,7 +418,7 @@ function ProdutosTab({ produtos, materiais, servicos, onSave, onDelete }) {
                 <div className="grid grid-cols-12 gap-2 px-1 mb-1">
                   <span className="col-span-5 text-xs font-medium text-gray-400 uppercase">Item</span>
                   <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-center">Qtd</span>
-                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Valor unit.</span>
+                  <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Valor ref.</span>
                   <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Custo</span>
                   <span className="col-span-1"></span>
                 </div>
@@ -523,7 +546,7 @@ function MateriaisTab({ materiais, servicos, onSaveMaterial, onDeleteMaterial, o
   );
 }
 
-// ─── MODAL DADOS DO CLIENTE ───────────────────────────────────────────────────
+// ─── MODAL PROTOCOLO ──────────────────────────────────────────────────────────
 function ModalProtocolo({ orc, onClose, onGerar }) {
   const [dados, setDados] = useState({
     razaoSocial: orc.dadosEmpresa?.razaoSocial || orc.cliente || '',
@@ -543,17 +566,15 @@ function ModalProtocolo({ orc, onClose, onGerar }) {
           <h2 className="text-base font-semibold text-gray-900">📦 Dados para Protocolo de Entrega</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
         </div>
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Razão Social / Nome" className="col-span-2"><input value={dados.razaoSocial} onChange={e => set('razaoSocial', e.target.value)} className={inp} /></Field>
-            <Field label="CNPJ / CPF"><input value={dados.cnpj} onChange={e => set('cnpj', e.target.value)} className={inp} placeholder="00.000.000/0001-00" /></Field>
-            <Field label="Telefone"><input value={dados.telefone} onChange={e => set('telefone', e.target.value)} className={inp} placeholder="(00) 00000-0000" /></Field>
-            <Field label="Endereço" className="col-span-2"><input value={dados.endereco} onChange={e => set('endereco', e.target.value)} className={inp} /></Field>
-            <Field label="Cidade / UF"><input value={dados.cidade} onChange={e => set('cidade', e.target.value)} className={inp} placeholder="Teresina / PI" /></Field>
-            <Field label="E-mail"><input value={dados.email} onChange={e => set('email', e.target.value)} className={inp} /></Field>
-            <Field label="Responsável"><input value={dados.responsavel} onChange={e => set('responsavel', e.target.value)} className={inp} /></Field>
-            <Field label="Cargo"><input value={dados.cargo} onChange={e => set('cargo', e.target.value)} className={inp} /></Field>
-          </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Razão Social / Nome" className="col-span-2"><input value={dados.razaoSocial} onChange={e => set('razaoSocial', e.target.value)} className={inp} /></Field>
+          <Field label="CNPJ / CPF"><input value={dados.cnpj} onChange={e => set('cnpj', e.target.value)} className={inp} placeholder="00.000.000/0001-00" /></Field>
+          <Field label="Telefone"><input value={dados.telefone} onChange={e => set('telefone', e.target.value)} className={inp} placeholder="(00) 00000-0000" /></Field>
+          <Field label="Endereço" className="col-span-2"><input value={dados.endereco} onChange={e => set('endereco', e.target.value)} className={inp} /></Field>
+          <Field label="Cidade / UF"><input value={dados.cidade} onChange={e => set('cidade', e.target.value)} className={inp} placeholder="Teresina / PI" /></Field>
+          <Field label="E-mail"><input value={dados.email} onChange={e => set('email', e.target.value)} className={inp} /></Field>
+          <Field label="Responsável"><input value={dados.responsavel} onChange={e => set('responsavel', e.target.value)} className={inp} /></Field>
+          <Field label="Cargo"><input value={dados.cargo} onChange={e => set('cargo', e.target.value)} className={inp} /></Field>
         </div>
         <div className="flex gap-3 justify-end mt-5">
           <button onClick={onClose} className={btnSecondary}>Cancelar</button>
@@ -630,6 +651,7 @@ function HistoricoTab({ orcamentos, produtos, onDelete, onUpdateOrcamento }) {
           const lucro = parseFloat(orc.lucro || 0);
           const venda = parseFloat(orc.venda || 0);
           const roi = custoTotal > 0 ? (lucro / custoTotal * 100) : 0;
+          const margem = venda > 0 ? (lucro / venda * 100) : 0;
           const movs = movimentos[orc.id] || [];
           const totalEntradas = movs.filter(m => m.tipo === 'entrada').reduce((a, m) => a + parseFloat(m.valor), 0);
           const totalSaidas = movs.filter(m => m.tipo === 'saida').reduce((a, m) => a + parseFloat(m.valor), 0);
@@ -646,7 +668,7 @@ function HistoricoTab({ orcamentos, produtos, onDelete, onUpdateOrcamento }) {
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap justify-end">
                   <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">Custo {fmt(custoTotal)}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${lucro >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>Lucro {fmt(lucro)}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${lucro >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>Lucro {fmt(lucro)} ({margem.toFixed(1)}%)</span>
                   <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">ROI {roi.toFixed(1)}%</span>
                   <button onClick={() => exportarInterno(orc)} className="text-xs text-gray-500 hover:text-gray-700 px-1.5">📄 Interno</button>
                   <button onClick={() => exportarExterno(orc)} className="text-xs text-orange-500 hover:text-orange-700 px-1.5">📋 Cliente</button>
@@ -660,7 +682,7 @@ function HistoricoTab({ orcamentos, produtos, onDelete, onUpdateOrcamento }) {
 
               <div className="border-t border-gray-100 pt-2">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-gray-400"><th className="text-left pb-1">Produto</th><th className="text-center pb-1">Qtd</th><th className="text-right pb-1">Custo unit.</th><th className="text-right pb-1">Total</th></tr></thead>
+                  <thead><tr className="text-gray-400"><th className="text-left pb-1">Produto</th><th className="text-center pb-1">Qtd</th><th className="text-right pb-1">Custo unit.</th><th className="text-right pb-1">Total custo</th></tr></thead>
                   <tbody>
                     {(orc.itens || []).map((it, i) => {
                       const p = produtos.find(x => x.id === it.prodId); const cu = p ? custoProduto(p) : 0;
@@ -669,7 +691,7 @@ function HistoricoTab({ orcamentos, produtos, onDelete, onUpdateOrcamento }) {
                   </tbody>
                 </table>
                 <div className="flex justify-end gap-4 text-xs mt-2 pt-2 border-t border-gray-100">
-                  <span className="text-gray-500">Venda: <strong className="text-gray-800">{fmt(venda)}</strong></span>
+                  <span className="text-gray-500">Venda: <strong className="text-orange-600">{fmt(venda)}</strong></span>
                   <span className="text-gray-500">Lucro: <strong className={lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}>{fmt(lucro)}</strong></span>
                 </div>
               </div>
