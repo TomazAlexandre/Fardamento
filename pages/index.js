@@ -153,25 +153,42 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
   const [prazo, setPrazo] = useState('A combinar');
   const [itens, setItens] = useState([]);
   const [selProd, setSelProd] = useState('');
-  const [vendaPorPeca, setVendaPorPeca] = useState('');
   const [salvando, setSalvando] = useState(false);
 
-  const totalQtd = itens.reduce((a, it) => a + (parseInt(it.qtd) || 0), 0);
-  const custoTotal = itens.reduce((a, it) => {
-    const p = produtos.find(x => x.id === it.prodId);
-    return a + (p ? custoProduto(p) * (parseInt(it.qtd) || 0) : 0);
-  }, 0);
-  const vendaTotal = (parseFloat(vendaPorPeca) || 0) * totalQtd;
-  const lucro = vendaTotal - custoTotal;
-  const margem = vendaTotal > 0 ? (lucro / vendaTotal * 100) : 0;
-  const roi = custoTotal > 0 ? (lucro / custoTotal * 100) : 0;
-
+  // Cada item: { prodId, nome, qtd, vendaPorPeca }
   function addItem() {
     const p = produtos.find(x => x.id === selProd); if (!p) return;
     const existe = itens.find(x => x.prodId === selProd);
-    if (existe) setItens(itens.map(x => x.prodId === selProd ? { ...x, qtd: x.qtd + 1 } : x));
-    else setItens([...itens, { prodId: p.id, nome: p.nome, qtd: 1 }]);
+    if (existe) {
+      setItens(itens.map(x => x.prodId === selProd ? { ...x, qtd: x.qtd + 1 } : x));
+    } else {
+      setItens([...itens, { prodId: p.id, nome: p.nome, qtd: 1, vendaPorPeca: '' }]);
+    }
   }
+
+  function updateItem(i, campo, valor) {
+    setItens(itens.map((x, j) => j === i ? { ...x, [campo]: valor } : x));
+  }
+
+  // Cálculos por item
+  function calcItem(it) {
+    const p = produtos.find(x => x.id === it.prodId);
+    const custoUnit = p ? custoProduto(p) : 0;
+    const qtd = parseInt(it.qtd) || 0;
+    const vendaUnit = parseFloat(it.vendaPorPeca) || 0;
+    const custoTotalItem = custoUnit * qtd;
+    const vendaTotalItem = vendaUnit * qtd;
+    const lucroItem = vendaTotalItem - custoTotalItem;
+    const margemItem = vendaTotalItem > 0 ? (lucroItem / vendaTotalItem * 100) : null;
+    return { custoUnit, qtd, vendaUnit, custoTotalItem, vendaTotalItem, lucroItem, margemItem };
+  }
+
+  // Totais gerais
+  const custoTotal = itens.reduce((a, it) => a + calcItem(it).custoTotalItem, 0);
+  const vendaTotal = itens.reduce((a, it) => a + calcItem(it).vendaTotalItem, 0);
+  const lucro = vendaTotal - custoTotal;
+  const margem = vendaTotal > 0 ? (lucro / vendaTotal * 100) : 0;
+  const roi = custoTotal > 0 ? (lucro / custoTotal * 100) : 0;
 
   async function exportarInterno() {
     if (!cliente.trim() || !itens.length) { alert('Preencha cliente e adicione itens.'); return; }
@@ -191,7 +208,7 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
     setSalvando(true);
     try {
       await onSaveOrcamento({ cliente, data, obs, validade, pagamento, prazo, itens: [...itens], custo_total: custoTotal, venda: vendaTotal, lucro });
-      setCliente(''); setItens([]); setVendaPorPeca(''); setObs('');
+      setCliente(''); setItens([]); setObs('');
       alert('Orçamento salvo!');
     } catch (e) { alert('Erro: ' + e.message); }
     setSalvando(false);
@@ -215,6 +232,7 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
       </Card>
 
       <Card title="Itens do Pedido">
+        {/* Seletor de produto */}
         <div className="flex gap-2 mb-4">
           <select value={selProd} onChange={e => setSelProd(e.target.value)} className={`${inp} flex-1`}>
             <option value="">Selecionar produto...</option>
@@ -222,36 +240,98 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
           </select>
           <button onClick={addItem} className={btnPrimary}>+ Adicionar</button>
         </div>
-        {itens.length === 0 && <p className="text-center text-gray-400 text-sm py-6">Nenhum item adicionado</p>}
+
+        {itens.length === 0 && (
+          <p className="text-center text-gray-400 text-sm py-6">Nenhum item adicionado</p>
+        )}
+
+        {/* Cabeçalho da tabela */}
+        {itens.length > 0 && (
+          <div className="grid grid-cols-12 gap-2 px-3 mb-1">
+            <span className="col-span-3 text-xs font-medium text-gray-400 uppercase">Produto</span>
+            <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Custo unit.</span>
+            <span className="col-span-1 text-xs font-medium text-gray-400 uppercase text-center">Qtd</span>
+            <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Venda/peça</span>
+            <span className="col-span-2 text-xs font-medium text-gray-400 uppercase text-right">Total venda</span>
+            <span className="col-span-1 text-xs font-medium text-gray-400 uppercase text-right">Margem</span>
+            <span className="col-span-1"></span>
+          </div>
+        )}
+
         <div className="space-y-2">
           {itens.map((it, i) => {
-            const p = produtos.find(x => x.id === it.prodId);
-            const custoUnit = p ? custoProduto(p) : 0;
-            const qtd = parseInt(it.qtd) || 0;
-            const custoTotalItem = custoUnit * qtd;
-            // preço de venda proporcional ao custo unitário
-            const custoMedio = custoTotal / (totalQtd || 1);
-            const vendaMedia = vendaTotal / (totalQtd || 1);
-            const vendaUnit = custoMedio > 0 ? (custoUnit / custoMedio) * vendaMedia : vendaMedia;
-            const vendaTotalItem = vendaUnit * qtd;
-            const lucroItem = vendaTotalItem - custoTotalItem;
-            const margemItem = vendaTotalItem > 0 ? (lucroItem / vendaTotalItem * 100) : 0;
+            const { custoUnit, qtd, vendaUnit, custoTotalItem, vendaTotalItem, lucroItem, margemItem } = calcItem(it);
+            const temVenda = vendaUnit > 0;
+            const margemCor = margemItem === null ? 'text-gray-400' : margemItem >= 20 ? 'text-emerald-600' : margemItem >= 0 ? 'text-amber-600' : 'text-red-500';
             return (
-              <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5">
-                <div className="flex items-center gap-3">
-                  <span className="flex-1 text-sm font-medium text-gray-800">{it.nome}</span>
-                  <span className="text-xs text-gray-400">Custo unit: {fmt(custoUnit)}</span>
-                  <input type="number" min="1" value={it.qtd}
-                    onChange={e => setItens(itens.map((x, j) => j === i ? { ...x, qtd: parseInt(e.target.value) || 1 } : x))}
-                    className="w-16 text-center border border-gray-200 rounded-md py-1 text-sm bg-white" />
-                  <button onClick={() => setItens(itens.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>
+              <div key={i} className="bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+                <div className="grid grid-cols-12 gap-2 items-center">
+                  {/* Nome */}
+                  <div className="col-span-3">
+                    <p className="text-sm font-medium text-gray-800 truncate">{it.nome}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Custo total: {fmt(custoTotalItem)}</p>
+                  </div>
+
+                  {/* Custo unit */}
+                  <div className="col-span-2 text-right">
+                    <span className="text-sm text-gray-600">{fmt(custoUnit)}</span>
+                  </div>
+
+                  {/* Qtd */}
+                  <div className="col-span-1">
+                    <input
+                      type="number" min="1" value={it.qtd}
+                      onChange={e => updateItem(i, 'qtd', parseInt(e.target.value) || 1)}
+                      className="w-full text-center border border-gray-200 rounded-md py-1 text-sm bg-white"
+                    />
+                  </div>
+
+                  {/* Venda por peça — campo principal */}
+                  <div className="col-span-2">
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">R$</span>
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={it.vendaPorPeca}
+                        onChange={e => updateItem(i, 'vendaPorPeca', e.target.value)}
+                        placeholder="0,00"
+                        className="w-full text-right border border-orange-200 rounded-md py-1 text-sm bg-white pr-2 pl-6 focus:outline-none focus:border-orange-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Total venda */}
+                  <div className="col-span-2 text-right">
+                    <span className={`text-sm font-semibold ${temVenda ? 'text-orange-600' : 'text-gray-300'}`}>
+                      {temVenda ? fmt(vendaTotalItem) : '—'}
+                    </span>
+                  </div>
+
+                  {/* Margem */}
+                  <div className="col-span-1 text-right">
+                    <span className={`text-xs font-bold ${margemCor}`}>
+                      {margemItem !== null ? margemItem.toFixed(1) + '%' : '—'}
+                    </span>
+                  </div>
+
+                  {/* Remover */}
+                  <div className="col-span-1 flex justify-center">
+                    <button onClick={() => setItens(itens.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>
+                  </div>
                 </div>
-                {vendaTotal > 0 && (
-                  <div className="flex items-center gap-4 mt-1.5 text-xs">
-                    <span className="text-gray-500">Custo total: <strong className="text-gray-700">{fmt(custoTotalItem)}</strong></span>
-                    <span className="text-gray-500">Venda unit: <strong className="text-orange-600">{fmt(vendaUnit)}</strong></span>
-                    <span className="text-gray-500">Venda total: <strong className="text-orange-600">{fmt(vendaTotalItem)}</strong></span>
-                    <span className={`font-semibold ${margemItem >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>Margem: {margemItem.toFixed(1)}%</span>
+
+                {/* Barra de margem visual */}
+                {temVenda && margemItem !== null && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${margemItem >= 20 ? 'bg-emerald-500' : margemItem >= 0 ? 'bg-amber-400' : 'bg-red-400'}`}
+                        style={{ width: Math.min(Math.max(margemItem, 0), 100) + '%' }}
+                      />
+                    </div>
+                    <span className="text-xs text-gray-400 w-16 text-right">
+                      lucro {fmt(lucroItem)}
+                    </span>
                   </div>
                 )}
               </div>
@@ -260,24 +340,56 @@ function OrcamentoTab({ produtos, onSaveOrcamento }) {
         </div>
       </Card>
 
+      {/* Resumo Financeiro */}
       <Card title="Resumo Financeiro">
-        <div className="grid grid-cols-4 gap-3 mb-4">
-          <Metric label="Custo interno" value={fmt(custoTotal)} color="text-emerald-700" />
-          <Metric label="Venda total" value={fmt(vendaTotal)} color="text-orange-600" />
-          <Metric label="Lucro" value={fmt(lucro)} color={lucro >= 0 ? 'text-emerald-700' : 'text-red-600'} />
-          <div className="bg-gray-50 rounded-lg p-3">
+        <div className="grid grid-cols-4 gap-3 mb-2">
+          <div className="bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-1">Custo interno</p>
+            <p className="text-lg font-semibold text-emerald-700">{fmt(custoTotal)}</p>
+          </div>
+          <div className="bg-orange-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-1">Venda total</p>
+            <p className="text-lg font-semibold text-orange-600">{fmt(vendaTotal)}</p>
+          </div>
+          <div className={`rounded-xl p-3 ${lucro >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
+            <p className="text-xs text-gray-400 mb-1">Lucro</p>
+            <p className={`text-lg font-semibold ${lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{fmt(lucro)}</p>
+          </div>
+          <div className="bg-blue-50 rounded-xl p-3">
             <p className="text-xs text-gray-400 mb-1">Margem / ROI</p>
-            <p className={`text-base font-semibold ${lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{margem.toFixed(1)}% / {roi.toFixed(1)}%</p>
+            <p className={`text-base font-semibold ${lucro >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
+              {margem.toFixed(1)}% / {roi.toFixed(1)}%
+            </p>
           </div>
         </div>
-        <Field label={`Preço por peça × ${totalQtd} peças = ${fmt(vendaTotal)}`}>
-          <input type="number" step="0.01" value={vendaPorPeca} onChange={e => setVendaPorPeca(e.target.value)}
-            placeholder="0,00 por peça" className={`${inp} text-lg font-semibold`} />
-        </Field>
+
+        {/* Detalhamento por item no resumo */}
+        {itens.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wide">Detalhamento por item</p>
+            <div className="space-y-1">
+              {itens.map((it, i) => {
+                const { custoTotalItem, vendaTotalItem, lucroItem, margemItem } = calcItem(it);
+                return (
+                  <div key={i} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
+                    <span className="text-gray-600 flex-1 truncate">{it.nome} <span className="text-gray-400">×{it.qtd}</span></span>
+                    <div className="flex items-center gap-4 flex-shrink-0">
+                      <span className="text-gray-500">Custo: <strong className="text-gray-700">{fmt(custoTotalItem)}</strong></span>
+                      <span className="text-orange-600">Venda: <strong>{fmt(vendaTotalItem)}</strong></span>
+                      <span className={margemItem !== null && margemItem >= 0 ? 'text-emerald-600' : 'text-red-500'}>
+                        {margemItem !== null ? margemItem.toFixed(1) + '%' : '—'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </Card>
 
       <div className="flex gap-3 justify-end flex-wrap">
-        <button onClick={() => { setItens([]); setVendaPorPeca(''); setCliente(''); }} className={btnSecondary}>Limpar</button>
+        <button onClick={() => { setItens([]); setCliente(''); setObs(''); }} className={btnSecondary}>Limpar</button>
         <button onClick={exportarInterno} className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700">📄 Orç. Interno</button>
         <button onClick={exportarExterno} className="px-4 py-2 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600">📋 Orç. Cliente</button>
         <button onClick={salvar} disabled={salvando} className={`${btnPrimary} disabled:opacity-50`}>{salvando ? 'Salvando...' : '✓ Salvar'}</button>
@@ -410,7 +522,7 @@ function ProdutosTab({ produtos, materiais, servicos, onSave, onDelete }) {
             )}
 
             {form.custos.length === 0 && addMode !== 'banco' && (
-              <p className="text-sm text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">Clique em "🧵 Do banco" ou "✏️ Manual" para adicionar itens</p>
+              <p className="text-sm text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">Clique em "🧵 Do banco" ou "✏️ Manual"</p>
             )}
 
             <div className="space-y-2">
@@ -682,17 +794,37 @@ function HistoricoTab({ orcamentos, produtos, onDelete, onUpdateOrcamento }) {
 
               <div className="border-t border-gray-100 pt-2">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-gray-400"><th className="text-left pb-1">Produto</th><th className="text-center pb-1">Qtd</th><th className="text-right pb-1">Custo unit.</th><th className="text-right pb-1">Total custo</th></tr></thead>
+                  <thead><tr className="text-gray-400">
+                    <th className="text-left pb-1">Produto</th>
+                    <th className="text-center pb-1">Qtd</th>
+                    <th className="text-right pb-1">Custo unit.</th>
+                    <th className="text-right pb-1">Venda unit.</th>
+                    <th className="text-right pb-1">Total custo</th>
+                    <th className="text-right pb-1">Total venda</th>
+                  </tr></thead>
                   <tbody>
                     {(orc.itens || []).map((it, i) => {
-                      const p = produtos.find(x => x.id === it.prodId); const cu = p ? custoProduto(p) : 0;
-                      return (<tr key={i} className="border-t border-gray-50"><td className="py-1 text-gray-700">{it.nome}</td><td className="py-1 text-center text-gray-600">{it.qtd}</td><td className="py-1 text-right text-gray-600">{fmt(cu)}</td><td className="py-1 text-right font-medium text-emerald-700">{fmt(cu * it.qtd)}</td></tr>);
+                      const p = produtos.find(x => x.id === it.prodId);
+                      const cu = p ? custoProduto(p) : 0;
+                      const vu = parseFloat(it.vendaPorPeca) || 0;
+                      const qtd = parseInt(it.qtd) || 0;
+                      return (
+                        <tr key={i} className="border-t border-gray-50">
+                          <td className="py-1 text-gray-700">{it.nome}</td>
+                          <td className="py-1 text-center text-gray-600">{qtd}</td>
+                          <td className="py-1 text-right text-gray-500">{fmt(cu)}</td>
+                          <td className="py-1 text-right text-orange-500">{vu > 0 ? fmt(vu) : '—'}</td>
+                          <td className="py-1 text-right text-gray-700">{fmt(cu * qtd)}</td>
+                          <td className="py-1 text-right font-medium text-orange-600">{vu > 0 ? fmt(vu * qtd) : '—'}</td>
+                        </tr>
+                      );
                     })}
                   </tbody>
                 </table>
                 <div className="flex justify-end gap-4 text-xs mt-2 pt-2 border-t border-gray-100">
                   <span className="text-gray-500">Venda: <strong className="text-orange-600">{fmt(venda)}</strong></span>
                   <span className="text-gray-500">Lucro: <strong className={lucro >= 0 ? 'text-emerald-700' : 'text-red-600'}>{fmt(lucro)}</strong></span>
+                  <span className="text-gray-500">Margem: <strong className={margem >= 0 ? 'text-blue-700' : 'text-red-600'}>{margem.toFixed(1)}%</strong></span>
                 </div>
               </div>
 
@@ -774,7 +906,6 @@ function ColaboradoresTab({ colaboradores, onSave, onDelete }) {
 
 function Card({ title, children }) { return <div className="bg-white rounded-xl border border-gray-200 p-4">{title && <h3 className="text-sm font-semibold text-gray-700 mb-3">{title}</h3>}{children}</div>; }
 function Field({ label, children, className = '' }) { return <div className={className}><label className="block text-xs text-gray-500 mb-1">{label}</label>{children}</div>; }
-function Metric({ label, value, color }) { return <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">{label}</p><p className={`text-lg font-semibold ${color}`}>{value}</p></div>; }
 
 const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-emerald-400 bg-white";
 const btnPrimary = "px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors";
